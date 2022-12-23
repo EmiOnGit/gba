@@ -1,22 +1,33 @@
-use std::time::Duration;
+use std::{
+    sync::mpsc::{self, Receiver},
+    thread::{self, JoinHandle},
+};
 
-use crate::{bus::Bus, cpu::Cpu};
+
+use crate::{
+    bus::Bus,
+    cpu::Cpu,
+    gpu::{DrawSignal, Gpu},
+};
 
 pub struct Gba {
-    cpu: Cpu,
+    _cpu: JoinHandle<()>,
+    gpu_receiver: Receiver<DrawSignal>,
 }
 impl Gba {
-    pub fn run(mut self) {
-        for _ in 0..1000000 {
-            self.cpu.step();
-            std::thread::sleep(Duration::from_millis(2));
-        }
+    pub async fn run(self) {
+        let gpu = Gpu::new(self.gpu_receiver);
+        gpu.run();
     }
 }
 impl Default for Gba {
     fn default() -> Gba {
+        let (sender, rx) = mpsc::channel();
+
         Self {
-            cpu: Cpu::new(Bus::default()),
+            _cpu: thread::spawn(move || Cpu::new(Bus::default().with_gpu(sender)).run()),
+            gpu_receiver: rx,
         }
     }
 }
+

@@ -1,8 +1,12 @@
+use std::time::{Duration, Instant};
+
 use crate::{
     bus::{Bus, OpCode},
+    gpu::DrawSignal,
     instruction::{AddressMove, Instruction},
 };
-
+const CLOCK_SPEED: usize = 4194304;
+const _FPS: f32 = 60.;
 pub struct Cpu {
     bus: Bus,
     // memory model for the registers:
@@ -16,6 +20,14 @@ pub struct Cpu {
     // ]
     registers: [u16; 6],
     cycles: usize,
+    mode: CpuMode,
+}
+#[derive(PartialEq, Debug, Clone)]
+pub enum CpuMode {
+    Run,
+    _Halt,
+    _DebugGpu,
+    Shutdown,
 }
 impl Cpu {
     pub fn new(bus: Bus) -> Self {
@@ -23,7 +35,39 @@ impl Cpu {
             bus,
             registers: [0; 6],
             cycles: 0,
+            mode: CpuMode::Run,
         }
+    }
+    pub fn run(mut self) {
+        while self.mode != CpuMode::Shutdown {
+            self.cycles = 0;
+            let now = Instant::now();
+            while self.cycles < CLOCK_SPEED {
+                self.cycles += 1;
+                for _i in 0..10 {
+                    let y = rand::random::<usize>();
+                    let x = rand::random::<usize>();
+                    let signal = DrawSignal::DrawPixel(x % 100, y % 100, self.cycles % 4);
+                    self.bus.send_gpu_signal(signal);
+                    let signal = DrawSignal::DrawPixel((x % 100), (y % 100) + 1, self.cycles % 4);
+                    self.bus.send_gpu_signal(signal);
+                    let signal = DrawSignal::DrawPixel((x % 100) + 1, (y % 100), self.cycles % 4);
+                    self.bus.send_gpu_signal(signal);
+                    let signal =
+                        DrawSignal::DrawPixel((x % 100) + 1, (y % 100) + 1, self.cycles % 4);
+                    self.bus.send_gpu_signal(signal);
+                }
+                self.cycles += self.step();
+            }
+            let elapsed = now.elapsed();
+            println!("elapsed {}", elapsed.as_millis());
+            if elapsed.as_secs() < 1 {
+                std::thread::sleep(Duration::from_secs(1) - elapsed);
+            }
+        }
+    }
+    pub fn set_mode(&mut self, mode: CpuMode) {
+        self.mode = mode;
     }
     pub fn r<R: Read>(&mut self, reg: R) -> R::Value {
         self.incr_cycles();
@@ -63,8 +107,11 @@ impl Cpu {
     fn next_word(&mut self) -> u16 {
         u16::from_ne_bytes([self.next_byte(), self.next_byte()])
     }
-
+    /// returns the cycles needed for this step
     pub fn step(&mut self) -> usize {
+        if self.mode != CpuMode::Run {
+            return 0;
+        }
         self.cycles = 0;
         let pc = self.pc();
         let op = self.bus.fetch_op(pc);
